@@ -112,7 +112,9 @@
       </label>
       <button type="submit" class="btn btn-primary auth-submit-btn" id="authSubmitBtn">Log In</button>
     </form>
-
+    <button type="button" id="forgotPasswordBtn">
+    Forgot Password?
+</button>
     <p class="auth-mode-toggle" id="authModeToggle"></p>
     </div><!-- /.auth-form-side -->
   </div><!-- /.auth-card -->
@@ -318,6 +320,77 @@
           <h3>Coding Tip</h3>
           <p id="codingTipText">Loading tip...</p>
         </div>
+      </div>
+
+      <!-- Personalized Recommendations -->
+      <div class="card glass" id="recommendationsCard" style="margin-top:1.5rem;display:none;">
+        <div class="card-icon-badge" style="background:#8b5cf6;">🧭</div>
+        <h3 style="margin:0 0 1rem;">What to Focus On Next</h3>
+        <ul id="recommendationsList" style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.6rem;"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DSA ROADMAP GENERATOR ============ -->
+  <section class="section" id="dsaRoadmapGenerator">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Personalized DSA Roadmap</h2>
+        <p>Generate a personalized DSA study plan based on your schedule and current level.</p>
+      </div>
+
+      <div class="card glass roadmap-generator">
+        <div class="form-row">
+          <label>Academic Year
+            <select id="dsaAcademicYear">
+              <option>1st Year</option>
+              <option>2nd Year</option>
+              <option>3rd Year</option>
+              <option>4th Year</option>
+            </select>
+          </label>
+
+          <label>Branch
+            <input type="text" id="dsaBranch" placeholder="e.g. Information Technology">
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>Current DSA Level
+            <select id="dsaLevel">
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </label>
+
+          <label>Target Duration
+            <select id="dsaDuration">
+              <option value="4">4 Weeks</option>
+              <option value="8">8 Weeks</option>
+              <option value="12">12 Weeks</option>
+              <option value="16">16 Weeks</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>Weekday Hours / Day
+            <input type="number" id="dsaWeekdayHours" min="0.5" max="12" step="0.5" value="2">
+          </label>
+
+          <label>Weekend Hours / Day
+            <input type="number" id="dsaWeekendHours" min="0.5" max="16" step="0.5" value="4">
+          </label>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="generateDsaRoadmapBtn">
+            Generate DSA Roadmap
+          </button>
+        </div>
+
+        <div id="dsaRoadmapPreview" class="roadmap-preview"></div>
       </div>
     </div>
   </section>

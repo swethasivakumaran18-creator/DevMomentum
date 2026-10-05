@@ -644,6 +644,86 @@ function initLiveClock(){
 /* ---------------------------------------------------------
    14. DASHBOARD STAT CARDS
 --------------------------------------------------------- */
+/**
+ * Build personalised recommendations from the user's roadmap progress.
+ * Considers: incomplete categories, missed tasks, overdue tasks, next upcoming tasks.
+ * @returns {string[]} Array of human-readable recommendation strings (max 5).
+ */
+function getRecommendations() {
+  const todayISO = toISODate(new Date());
+  const recommendations = [];
+
+  // 1. Categories with less than 50% completion (weakest areas)
+  const categories = [...new Set(STATE.tasks.map(t => t.category).filter(Boolean))];
+  const weakCategories = categories
+    .map(cat => {
+      const catTasks = STATE.tasks.filter(t => t.category === cat);
+      const prog = calcProgress(catTasks);
+      return { cat, pct: prog.pct, pending: prog.pending };
+    })
+    .filter(c => c.pct < 50 && c.pending > 0)
+    .sort((a, b) => a.pct - b.pct)
+    .slice(0, 2);
+
+  for (const { cat, pct, pending } of weakCategories) {
+    recommendations.push(
+      `📚 <strong>${cat}</strong> is only ${pct}% complete — ${pending} task${pending > 1 ? "s" : ""} remaining.`
+    );
+  }
+
+  // 2. Missed tasks (overdue and not completed)
+  const missed = STATE.tasks.filter(t => !t.completed && t.date < todayISO && t.missedFromDate);
+  if (missed.length > 0) {
+    const oldest = missed.sort((a, b) => a.date.localeCompare(b.date))[0];
+    recommendations.push(
+      `⚠️ You have ${missed.length} missed task${missed.length > 1 ? "s" : ""}. Start with: <em>${escapeHtml(oldest.title || "Missed task")}</em>.`
+    );
+  }
+
+  // 3. Today's pending tasks
+  const todayPending = STATE.tasks.filter(t => !t.completed && t.date === todayISO);
+  if (todayPending.length > 0) {
+    recommendations.push(
+      `📅 ${todayPending.length} task${todayPending.length > 1 ? "s are" : " is"} due today — keep your streak going! 🔥`
+    );
+  }
+
+  // 4. Next upcoming task (tomorrow onward)
+  const upcoming = STATE.tasks
+    .filter(t => !t.completed && t.date > todayISO)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (upcoming.length > 0) {
+    const next = upcoming[0];
+    recommendations.push(
+      `🚀 Up next: <em>${escapeHtml(next.title || "Upcoming task")}</em> on ${formatShortDate(fromISODate(next.date))}.`
+    );
+  }
+
+  // 5. Motivational nudge if doing well
+  if (recommendations.length === 0) {
+    const overall = overallProgress();
+    if (overall.pct >= 80) {
+      recommendations.push(`🏆 You're ${overall.pct}% done — you're crushing it! Keep the momentum going.`);
+    } else {
+      recommendations.push(`💡 Pick any pending category and complete one task today to build momentum.`);
+    }
+  }
+
+  return recommendations.slice(0, 5);
+}
+
+function renderRecommendations() {
+  const recs = getRecommendations();
+  const card = document.getElementById("recommendationsCard");
+  const list = document.getElementById("recommendationsList");
+  if (!card || !list) return;
+  if (recs.length === 0) { card.style.display = "none"; return; }
+  list.innerHTML = recs.map(r =>
+    `<li style="padding:0.5rem 0.75rem;background:rgba(139,92,246,0.08);border-radius:8px;font-size:0.95rem;line-height:1.5;">${r}</li>`
+  ).join("");
+  card.style.display = "";
+}
+
 function renderDashboard(){
   const todayISO = toISODate(new Date());
   const todayTasks = getTasksForDate(todayISO);
@@ -673,6 +753,7 @@ function renderDashboard(){
   `).join("");
 
   renderTips();
+  renderRecommendations();
 }
 
 function renderTips(){
@@ -1332,13 +1413,54 @@ function showMonthDayDetail(iso){
 --------------------------------------------------------- */
 function renderStatistics(){
   const overall = overallProgress();
+
+  // --- Weekly study hours ---
+  const weekProg = calcProgress(weekTasks(new Date()));
+
+  // --- Monthly study hours ---
+  const monthProg = calcProgress(monthTasks(new Date()));
+
+  // --- Missed-task rate ---
+  const todayISO = toISODate(new Date());
+  const pastTasks = STATE.tasks.filter(t => t.date < todayISO);
+  const missedCount = pastTasks.filter(t => !t.completed && t.missedFromDate).length;
+  const missedRate = pastTasks.length > 0
+    ? Math.round((missedCount / pastTasks.length) * 100)
+    : 0;
+
+  // --- Estimated completion date ---
+  let estimatedCompletion = "—";
+  const remainingTasks = overall.pending;
+  const completedTotal = overall.completed;
+  if (completedTotal > 0 && remainingTasks > 0) {
+    // Average tasks per day from the start
+    const startISO = STATE.tasks.length > 0
+      ? STATE.tasks.map(t => t.date).sort()[0]
+      : todayISO;
+    const daysElapsed = Math.max(1, Math.round(
+      (fromISODate(todayISO) - fromISODate(startISO)) / 86400000
+    ));
+    const avgPerDay = completedTotal / daysElapsed;
+    if (avgPerDay > 0) {
+      const daysLeft = Math.ceil(remainingTasks / avgPerDay);
+      const estDate = addDays(new Date(), daysLeft);
+      estimatedCompletion = formatShortDate(estDate);
+    }
+  } else if (remainingTasks === 0) {
+    estimatedCompletion = "Done 🎉";
+  }
+
   const cards = [
     { label:"Current Streak", value: `${STATE.streak} days` },
     { label:"Longest Streak", value: `${STATE.longestStreak} days` },
     { label:"Total Study Hours", value: minutesToHoursLabel(overall.minutes) },
+    { label:"This Week", value: minutesToHoursLabel(weekProg.minutes) },
+    { label:"This Month", value: minutesToHoursLabel(monthProg.minutes) },
     { label:"Tasks Remaining", value: overall.pending },
     { label:"Tasks Completed", value: overall.completed },
     { label:"Completion %", value: overall.pct + "%" },
+    { label:"Missed-Task Rate", value: missedRate + "%" },
+    { label:"Est. Completion", value: estimatedCompletion },
     { label:"Level", value: `Lvl ${currentLevel()}` },
     { label:"XP", value: STATE.xp },
   ];
@@ -1537,6 +1659,57 @@ function initFab(){
 /* ---------------------------------------------------------
    27. SETTINGS: EXPORT / IMPORT / PRINT / RESET
 --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   STUDY REMINDERS — Browser Notification API
+--------------------------------------------------------- */
+const REMINDER_PREF_KEY = "momentumForgeReminders";
+
+function isReminderEnabled() {
+  return localStorage.getItem(REMINDER_PREF_KEY) !== "off";
+}
+
+function setReminderEnabled(enabled) {
+  localStorage.setItem(REMINDER_PREF_KEY, enabled ? "on" : "off");
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const result = await Notification.requestPermission();
+  return result === "granted";
+}
+
+function sendStudyReminder(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  new Notification(title, { body, icon: "assets/icons/favicon-32.png" });
+}
+
+async function checkAndSendReminders() {
+  if (!isReminderEnabled()) return;
+  const granted = await requestNotificationPermission();
+  if (!granted) return;
+
+  const todayISO = toISODate(new Date());
+  const todayTasks = STATE.tasks.filter(t => t.date === todayISO && !t.completed);
+  const missedTasks = STATE.tasks.filter(t => !t.completed && t.date < todayISO && t.missedFromDate);
+
+  if (missedTasks.length > 0) {
+    sendStudyReminder(
+      "⚠️ You have missed tasks",
+      `${missedTasks.length} task${missedTasks.length > 1 ? "s are" : " is"} overdue. Catch up to keep your streak!`
+    );
+    return;
+  }
+
+  if (todayTasks.length > 0) {
+    sendStudyReminder(
+      `📅 ${todayTasks.length} task${todayTasks.length > 1 ? "s" : ""} for today`,
+      `Start with: ${todayTasks[0].title || "your first task"}`
+    );
+  }
+}
+
 function initSettings(){
   document.getElementById("exportJsonBtn").addEventListener("click", exportProgress);
   document.getElementById("importJsonInput").addEventListener("change", importProgress);
@@ -1871,6 +2044,7 @@ function shiftRoadmapToStartDate(userStartDate){
   initFab();
   initSettings();
   initKeyboardShortcuts();
+  setTimeout(checkAndSendReminders, 2000); // slight delay to let app fully init
 
   renderHero();
   renderDashboard();
@@ -1901,3 +2075,341 @@ function shiftRoadmapToStartDate(userStartDate){
 // of running automatically on DOMContentLoaded — auth.js calls this once
 // a user is signed in (either fresh, or via a remembered session).
 window.startMomentumForgeApp = init;
+// ============ DSA ROADMAP GENERATOR ============
+
+const dsaTopics = [
+  { name: "Arrays", hours: 4, level: 1 },
+  { name: "Strings", hours: 4, level: 1 },
+  { name: "Searching", hours: 3, level: 1 },
+  { name: "Sorting", hours: 4, level: 1 },
+  { name: "Linked Lists", hours: 5, level: 2 },
+  { name: "Stacks", hours: 3, level: 2 },
+  { name: "Queues", hours: 3, level: 2 },
+  { name: "Recursion", hours: 5, level: 2 },
+  { name: "Trees", hours: 6, level: 2 },
+  { name: "BST", hours: 4, level: 2 },
+  { name: "Heaps", hours: 4, level: 2 },
+  { name: "Hashing", hours: 4, level: 2 },
+  { name: "Graphs", hours: 7, level: 3 },
+  { name: "Greedy Algorithms", hours: 5, level: 3 },
+  { name: "Dynamic Programming", hours: 8, level: 3 }
+];
+
+function generateDsaRoadmap() {
+  const academicYear = document.getElementById("dsaAcademicYear").value;
+  const branch = document.getElementById("dsaBranch").value.trim();
+  const level = document.getElementById("dsaLevel").value;
+  const duration = Number(document.getElementById("dsaDuration").value);
+  const weekdayHours = Number(document.getElementById("dsaWeekdayHours").value);
+  const weekendHours = Number(document.getElementById("dsaWeekendHours").value);
+
+  const preview = document.getElementById("dsaRoadmapPreview");
+
+  // Validate inputs before scheduling.
+  if (!branch) {
+    preview.innerHTML = "<p class=\"warning\">Please enter your branch.</p>";
+    return;
+  }
+
+  if (
+    !Number.isFinite(duration) ||
+    duration <= 0 ||
+    !Number.isFinite(weekdayHours) ||
+    weekdayHours <= 0 ||
+    !Number.isFinite(weekendHours) ||
+    weekendHours <= 0
+  ) {
+    preview.innerHTML =
+      "<p class=\"warning\">Please enter valid study hours greater than 0.</p>";
+    return;
+  }
+
+  const weeklyHours = (weekdayHours * 5) + (weekendHours * 2);
+  const totalAvailableHours = weeklyHours * duration;
+
+    /*
+   * Use academic year and branch to personalize topic priority.
+   */
+
+  let selectedTopics = [...dsaTopics];
+
+  if (level === "advanced") {
+    selectedTopics.sort((a, b) => b.level - a.level);
+  } else if (level === "intermediate") {
+    selectedTopics.sort((a, b) => {
+      if (a.level === 1 && b.level !== 1) return 1;
+      if (a.level !== 1 && b.level === 1) return -1;
+      return a.level - b.level;
+    });
+  }
+
+    /*
+   * Use academic year and branch to personalize topic priority.
+   */
+  const yearNumber = Number(academicYear.charAt(0));
+
+  const branchText = branch.toLowerCase();
+  const technicalBranch =
+    branchText.includes("information") ||
+    branchText.includes("computer") ||
+    branchText.includes("software") ||
+    /\bit\b/.test(branchText);
+
+  selectedTopics.sort((a, b) => {
+    // Academic year affects which difficulty is prioritized.
+    const yearPriority =
+      yearNumber <= 2
+        ? a.level - b.level
+        : yearNumber === 3
+          ? Math.abs(a.level - 2) - Math.abs(b.level - 2)
+          : b.level - a.level;
+
+    if (yearPriority !== 0) {
+      return yearPriority;
+    }
+
+    // Current DSA level is the secondary priority.
+    if (level === "advanced" && a.level !== b.level) {
+      return b.level - a.level;
+    }
+
+    if (level === "intermediate" && a.level !== b.level) {
+      return b.level - a.level;
+    }
+
+    // Technical branches prioritize fundamentals consistently.
+    if (technicalBranch && a.level === b.level) {
+      return a.name.localeCompare(b.name);
+    }
+
+    return 0;
+  });
+
+  const totalTopicHours = selectedTopics.reduce(
+    (sum, topic) => sum + topic.hours,
+    0
+  );
+
+  // Do not create a roadmap that cannot fit inside the selected duration.
+  if (totalTopicHours > totalAvailableHours) {
+    preview.innerHTML = `
+      <p class="warning">
+        Your selected ${duration}-week schedule provides
+        <strong>${totalAvailableHours} hours</strong>, but this roadmap
+        requires approximately <strong>${totalTopicHours} hours</strong>.
+        Increase your study hours or choose a longer duration.
+      </p>
+    `;
+    return;
+  }
+
+  const topicsPerWeek = Math.ceil(selectedTopics.length / duration);
+
+  let html = `
+    <h3>Your Personalized DSA Roadmap</h3>
+
+    <p>
+      <strong>${escapeHtml(academicYear)}</strong> ·
+      <strong>${escapeHtml(branch)}</strong> ·
+      ${escapeHtml(level.charAt(0).toUpperCase() + level.slice(1))}
+    </p>
+
+    <p>
+      Available study time:
+      <strong>${totalAvailableHours} hours</strong>
+    </p>
+
+    <p>
+      Estimated DSA study time:
+      <strong>${totalTopicHours} hours</strong>
+    </p>
+  `;
+
+  html += `<div class="roadmap-topic-list">`;
+
+  for (let week = 1; week <= duration; week++) {
+    const start = (week - 1) * topicsPerWeek;
+    const end = Math.min(start + topicsPerWeek, selectedTopics.length);
+
+    if (start >= selectedTopics.length) {
+      break;
+    }
+
+    const weekTopics = selectedTopics.slice(start, end);
+
+    const weekHours = weekTopics.reduce(
+      (sum, topic) => sum + topic.hours,
+      0
+    );
+
+    html += `
+      <div class="card glass">
+        <h4>Week ${week}</h4>
+
+        <p>
+          ${weekTopics.map(topic => topic.name).join(", ")}
+        </p>
+
+        <p>
+          Estimated time: ${weekHours} hours
+        </p>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  preview.innerHTML = html;
+
+  // ==========================================
+  // CREATE CALENDAR TASKS
+  // ==========================================
+
+  const newTasks = [];
+
+  let currentDate = new Date();
+  currentDate.setHours(0, 0, 0, 0);
+
+  const endDate = new Date(currentDate);
+  endDate.setDate(endDate.getDate() + duration * 7 - 1);
+
+  // Track how many minutes have already been used on currentDate so
+  // multiple topic chunks can share a day up to its capacity.
+  let usedMinutesToday = 0;
+
+  for (const topic of selectedTopics) {
+    let remainingMinutes = topic.hours * 60;
+    let part = 1;
+
+    while (remainingMinutes > 0) {
+      // Never schedule beyond the selected duration.
+      if (currentDate > endDate) {
+        preview.innerHTML += `
+          <p class="warning">
+            The roadmap could not fit all tasks inside the selected duration.
+          </p>
+        `;
+        return;
+      }
+
+      const day = currentDate.getDay();
+
+      const dailyCapacityMinutes = (day === 0 || day === 6 ? weekendHours : weekdayHours) * 60;
+
+      if (dailyCapacityMinutes <= 0) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        usedMinutesToday = 0;
+        continue;
+      }
+
+      const remainingCapacityToday = dailyCapacityMinutes - usedMinutesToday;
+
+      if (remainingCapacityToday <= 0) {
+        // Day is full — advance to tomorrow.
+        currentDate.setDate(currentDate.getDate() + 1);
+        usedMinutesToday = 0;
+        continue;
+      }
+
+      const taskDuration = Math.min(remainingMinutes, remainingCapacityToday, 120);
+
+      const date = toISODate(currentDate);
+
+      const topicId = topic.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-");
+
+      const taskId = `dsa-generated-${topicId}-${part}`;
+
+      newTasks.push({
+        id: taskId,
+        date: date,
+        category: "DSA",
+        topic:
+          topic.hours * 60 > 120
+            ? `${topic.name} - Part ${part}`
+            : topic.name,
+        durationMinutes: taskDuration,
+        difficulty:
+          level === "beginner"
+            ? "Easy"
+            : level === "intermediate"
+              ? "Medium"
+              : "Hard",
+        priority: "High",
+        completed: false,
+        order: getTasksForDate(date).length + newTasks.length + 1
+      });
+
+      remainingMinutes -= taskDuration;
+      usedMinutesToday += taskDuration;
+
+      // Only advance to the next day when today's capacity is exhausted.
+      if (usedMinutesToday >= dailyCapacityMinutes) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        usedMinutesToday = 0;
+      }
+
+      part++;
+    }
+  }
+
+  // ==========================================
+  // PRESERVE COMPLETED GENERATED TASKS
+  // ==========================================
+
+  const oldGeneratedTasks = STATE.tasks.filter(task =>
+    task.id.startsWith("dsa-generated-")
+  );
+
+  const completedGeneratedTasks = oldGeneratedTasks.filter(
+    task => task.completed
+  );
+
+  STATE.tasks = STATE.tasks.filter(
+    task => !task.id.startsWith("dsa-generated-")
+  );
+
+  newTasks.forEach(task => {
+    const previousTask = completedGeneratedTasks.find(
+      oldTask => oldTask.id === task.id
+    );
+
+    if (previousTask) {
+      task.completed = true;
+    }
+
+    STATE.tasks.push(task);
+  });
+
+  saveState();
+
+  renderDaily();
+  renderDashboard();
+
+  if (
+    document.getElementById("panel-weekly").classList.contains("active")
+  ) {
+    renderWeekly();
+  }
+
+  if (
+    document.getElementById("panel-monthly").classList.contains("active")
+  ) {
+    renderMonthly();
+  }
+
+  showToast(
+    "DSA roadmap added to your calendar",
+    "success"
+  );
+}
+
+const generateDsaRoadmapBtn =
+  document.getElementById("generateDsaRoadmapBtn");
+
+if (generateDsaRoadmapBtn) {
+  generateDsaRoadmapBtn.addEventListener(
+    "click",
+    generateDsaRoadmap
+  );
+}
